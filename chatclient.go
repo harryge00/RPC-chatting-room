@@ -6,13 +6,10 @@ import "log"
 import "os"
 import "bufio"
 import "time"
+import "common"
+import "strings"
 // import "container/list"
 
-func checkMessages() {
-	for {
-
-	}
-}
 func main() {
 	client, err := rpc.DialHTTP("tcp", "localhost:3410")
 	if err != nil {
@@ -21,7 +18,7 @@ func main() {
 	var reply string
 	username := os.Args[1]
 	fmt.Printf("%s connecting to server\n", username)
-	client.Call("Server.Register", &username, &reply)
+	client.Call("Server.Register", username, &reply)
 	if err != nil {
 		log.Fatal("Register err:", err)
 	}
@@ -31,42 +28,48 @@ func main() {
 		for {
 			time.Sleep(1000 * time.Millisecond)
 			var replies []string
-			client.Call("Server.CheckMessages", username, replies)
-			for _, v := replies {
+			client.Call("Server.CheckMessages", username, &replies)
+			for _, v := range replies {
 				fmt.Println(v)
 			}
 		}
-	}
-	var command string
+	} ()
+	var arg string
+	loop:
 	for scanner.Scan() {
-		switch scanner.Text() {
+		line := scanner.Text()
+		params := strings.Fields(line)
+		switch params[0] {
 		case "list":
-			client.Call("Server.List", &reply)
+			client.Call("Server.List", arg, &reply)
 			fmt.Println(reply)
 		case "tell":
-			fmt.Println("to whom?")
-			target := scanner.Text()
-			fmt.Println("what?")
-			message := scanner.Text()
-			args := &TellArgs{
+			target := params[1]
+			message := strings.Join(params[2:], " ")
+			args := &common.TellArgs{
 				User: username,
 				Target: target,
-				Message: message
+				Message: message,
 			}
 			client.Call("Server.Tell", args, &reply)
 		case "say":
-			fmt.Println("what?")
-			message := scanner.Text()
-			args := &TellArgs{
+			message := strings.Join(params[1:], " ")
+			args := &common.SayArgs{
 				User: username,
-				Message: message
+				Message: message,
 			}
 			client.Call("Server.Say", args, &reply)
 		case "logout":
-			client.Call("Server.Logout", username)
-			break
+			client.Call("Server.Logout", username, &reply)
+			break loop
+		case "shutdown":
+			client.Call("Server.Shutdown", username, &reply)
+			break loop
+		default:
+			fmt.Println("help?")
 		}
 	}
+	fmt.Println("client exiting")
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintln(os.Stderr, "reading standard input:", err)
 	}

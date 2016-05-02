@@ -1,64 +1,77 @@
 package main
 
 import "net/rpc"
-import "container/list"
 import "log"
 import "errors"
 import "net"
 import "net/http"
 import "fmt"
+import "common"
 
 type Server struct {
-	users *list.List
+	users map[string]chan string
 	name  string
+	shutChan chan bool
 }
 
-func (s *Server) Register(user *string, reply *string) error {
-	if user == nil {
+func (s *Server) Register(username string, reply *string) error {
+	if username == "" {
 		return errors.New("username required")
 	}
-	log.Printf("%s joined", *user)
-	if s.users.Len() == 0 {
-		*reply = ""
+	if _, exists := s.users[username]; exists {
+		return errors.New("username already registered")
 	}
-	for e := s.users.Front(); e != nil; e = e.Next() {
-		// fmt.Println(e.Value.(string))
-		*reply += e.Value.(string) + "\n"
+	msg := username +" joined"
+	for user, msgQueue := range s.users {
+		*reply += user + "\n"
+		msgQueue <- msg
 	}
-	s.users.PushBack(*user)
+	s.users[username] = make(chan string, 100)
 	return nil
 }
-func (s *Server) List(reply *string) error{
-	for e := s.users.Front(); e != nil; e = e.Next() {
-			fmt.Println(e.Value.(string))
-			*reply += e.Value.(string) + "\n"
+func (s *Server) List(arg string, reply *string) error{
+	for user, _ := range s.users {
+		*reply += user + "\n"
 	}
 	return nil
 }
-func (s *Server) CheckMessages(username string, reply []string) error{
+func (s *Server) CheckMessages(username string, reply *[]string) error{
 	fmt.Printf("%s CheckMessages\n", username)
-	reply = make([]string, 2)
-	reply[0] = "Not"
-	reply[1] = "Implemented"
+	*reply = make([]string, len(s.users[username]))
+	
+	for i:=0;len(s.users[username]) > 0;i++ {
+		(*reply)[i] = <- s.users[username]
+	}
 	return nil
 }
-func (s *Server) Tell(arg *TellArgs, reply *string) error{
+func (s *Server) Tell(arg *common.TellArgs, reply *string) error{
 	fmt.Printf("%s telling to %s: %s\n", arg.User, arg.Target, arg.Message)
-	*reply = "Not Implemented"
+	msg := arg.User + " tells you " + arg.Message
+	s.users[arg.Target] <- msg
 	return nil
 }
-func (s *Server) Say(arg *SayArgs, reply *string) error{
+func (s *Server) Say(arg *common.SayArgs, reply *string) error{
 	fmt.Printf("%s says %s\n", arg.User, arg.Message)
-	*reply = "Not Implemented"
+	msg := arg.User + " says " + arg.Message
+	for _, msgQueue := range s.users {
+		msgQueue <- msg
+	}
 	return nil
 }
-func (s *Server) Logout(username string) error{
+func (s *Server) Logout(username string, reply *string) error{
 	fmt.Printf("%s logout\n", username)
+	delete(s.users, username)
+	return nil
+}
+func (s *Server) Shutdown(username string, reply *string) error {
+	fmt.Printf("%s request shutdown\n", username)
+	s.shutChan <- true
 	return nil
 }
 func main() {
 	server := new(Server)
-	server.users = list.New()
+	server.users = make(map[string] chan string)
+	server.shutChan = make(chan bool)
 	rpc.Register(server)
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", ":3410")
@@ -67,9 +80,6 @@ func main() {
 	}
 	log.Println("serving")
 	go http.Serve(l, nil)
-	for{
-		select {
-
-		}
-	}
+	<- server.shutChan
+	fmt.Println("shutting")
 }
